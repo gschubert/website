@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Credit Union Review Labeler — LLM Eval Tool</title>
+<style>
+  :root{
+    --bg:#f4f6f9; --card:#ffffff; --ink:#1f2933; --muted:#66727e;
+    --line:#e2e8f0; --brand:#0b6b74; --brand-dk:#095057; --accent:#1971c2;
+    --good:#2b8a3e; --good-bg:#ebfbee; --bad:#c92a2a; --bad-bg:#fff0f0;
+    --warn:#e8590c; --shadow:0 1px 3px rgba(16,24,40,.06),0 6px 20px rgba(16,24,40,.06);
+    --grok:#7048e8; --gpt:#1971c2; --deepseek:#0ca678;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--bg); color:var(--ink); line-height:1.5; font-size:15px;
+  }
+  header.top{
+    background:linear-gradient(135deg,var(--brand),var(--brand-dk));
+    color:#fff; padding:22px 24px 18px;
+  }
+  header.top .wrap{max-width:1040px;margin:0 auto}
+  header.top h1{margin:0;font-size:22px;font-weight:700;letter-spacing:.2px}
+  header.top p{margin:4px 0 0;opacity:.9;font-size:14px}
+  .container{max-width:1040px;margin:0 auto;padding:22px 24px 80px}
+
+  /* Stepper */
+  .stepper{display:flex;gap:8px;margin:18px 0 22px;flex-wrap:wrap}
+  .step-pill{
+    flex:1;min-width:180px;display:flex;align-items:center;gap:10px;
+    background:var(--card);border:1px solid var(--line);border-radius:12px;
+    padding:10px 14px;box-shadow:var(--shadow);opacity:.6;transition:.2s;
+  }
+  .step-pill .num{
+    width:26px;height:26px;border-radius:50%;background:var(--line);color:var(--muted);
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;flex:0 0 auto;
+  }
+  .step-pill.active{opacity:1;border-color:var(--brand)}
+  .step-pill.active .num{background:var(--brand);color:#fff}
+  .step-pill.done{opacity:1}
+  .step-pill.done .num{background:var(--good);color:#fff}
+  .step-pill .t{font-weight:600;font-size:13.5px}
+  .step-pill .s{font-size:12px;color:var(--muted)}
+
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px 22px;margin-bottom:18px}
+  h2.section{font-size:18px;margin:0 0 4px}
+  p.lead{color:var(--muted);margin:0 0 14px;font-size:14px}
+
+  /* Review card */
+  .review{border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin-bottom:14px;background:#fff}
+  .review .rhead{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .review .badge-num{background:var(--brand);color:#fff;border-radius:8px;font-weight:700;font-size:13px;padding:3px 10px}
+  .review .rtext{font-size:14px;color:#333;white-space:pre-wrap;margin-bottom:2px}
+  .controls{display:flex;gap:16px;flex-wrap:wrap;margin-top:12px}
+  .field{display:flex;flex-direction:column;gap:5px;min-width:220px;flex:1}
+  .field label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  select,textarea,input[type=password],input[type=text]{
+    font-family:inherit;font-size:14px;padding:9px 11px;border:1px solid var(--line);
+    border-radius:9px;background:#fff;color:var(--ink);width:100%;
+  }
+  select:focus,textarea:focus,input:focus{outline:2px solid var(--brand);outline-offset:0;border-color:var(--brand)}
+  select.unset{color:#9aa5b1}
+  textarea{resize:vertical;line-height:1.5}
+
+  .btn{
+    display:inline-flex;align-items:center;gap:8px;background:var(--brand);color:#fff;border:none;
+    padding:11px 20px;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;transition:.15s;
+  }
+  .btn:hover{background:var(--brand-dk)}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn.secondary{background:#fff;color:var(--brand);border:1px solid var(--brand)}
+  .btn.secondary:hover{background:#f0f7f8}
+  .btn.ghost{background:transparent;color:var(--muted);border:1px solid var(--line)}
+  .btn.ghost:hover{background:#f7f9fb}
+  .btnrow{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-top:6px}
+
+  .hint{font-size:12.5px;color:var(--muted)}
+  .note{background:#f0f7f8;border:1px solid #cfe6e8;border-radius:10px;padding:12px 14px;font-size:13.5px;color:#0b5057;margin-bottom:14px}
+  .warnbox{background:var(--bad-bg);border:1px solid #ffc9c9;color:var(--bad);border-radius:10px;padding:11px 14px;font-size:13.5px;margin-top:10px;display:none}
+  .appendbox{border:1px dashed #b9c6d1;background:#f8fafc;border-radius:12px;padding:12px 14px 14px;margin-bottom:16px}
+  .appendlabel{font-size:11.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .appendbox pre{margin:0;padding:12px 14px;background:#0f2830;color:#dbe7ea;border-radius:9px;overflow-x:auto;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word}
+
+  /* progress */
+  .progress-wrap{margin-top:16px;display:none}
+  .bar{height:12px;background:var(--line);border-radius:99px;overflow:hidden}
+  .bar > div{height:100%;width:0;background:linear-gradient(90deg,var(--brand),var(--accent));transition:width .2s}
+  .progress-label{font-size:13px;color:var(--muted);margin-top:6px}
+
+  /* labels/badges */
+  .badge{display:inline-block;padding:3px 9px;border-radius:99px;font-size:12px;font-weight:600;white-space:nowrap}
+  .b-pos{background:#e6f4ea;color:#1e7e34}
+  .b-neg{background:#fdecea;color:#c0392b}
+  .b-mix{background:#fff4e6;color:#b8590a}
+  .b-topic{background:#eef2f7;color:#334}
+  .b-match{background:var(--good-bg);color:var(--good);border:1px solid #b2f2bb}
+  .b-miss{background:var(--bad-bg);color:var(--bad);border:1px solid #ffc9c9}
+  .b-err{background:#f1f3f5;color:#868e96;border:1px dashed #ced4da}
+
+  /* summary cards */
+  .summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:20px}
+  .mcard{border:1px solid var(--line);border-radius:14px;padding:16px 18px;background:#fff;box-shadow:var(--shadow)}
+  .mcard .mname{display:flex;align-items:center;gap:8px;font-weight:700;font-size:15px;margin-bottom:2px}
+  .dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+  .mcard .big{font-size:34px;font-weight:800;line-height:1.1;margin:6px 0 2px}
+  .mcard .biglbl{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+  .metric{margin:9px 0}
+  .metric .mrow{display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px}
+  .metric .track{height:8px;background:var(--line);border-radius:99px;overflow:hidden}
+  .metric .track > div{height:100%;border-radius:99px}
+
+  /* results table */
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:760px}
+  th,td{padding:10px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+  th{background:#f7f9fb;font-size:11.5px;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);position:sticky;top:0}
+  th .dot{display:inline-block;margin-right:6px}
+  td.rev{max-width:280px;min-width:200px}
+  td.rev .rt{color:#444}
+  td.rev details summary{color:var(--accent);cursor:pointer;font-size:12px}
+  .cellstack{display:flex;flex-direction:column;gap:5px}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:12px 2px 0}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .swatch{width:13px;height:13px;border-radius:4px;display:inline-block}
+
+  .hidden{display:none !important}
+  .right{margin-left:auto}
+  code.k{background:#f1f3f5;padding:1px 6px;border-radius:5px;font-size:12.5px}
+  a{color:var(--accent)}
+  footer.foot{text-align:center;color:var(--muted);font-size:12px;padding:20px}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <h1>🏦 Credit Union Review Labeler</h1>
+    <p id="subtitle">Hand-label member reviews, then see how three AI models label them — and where they disagree with you.</p>
+  </div>
+</header>
+
+<div class="container">
+
+  <!-- Stepper -->
+  <div class="stepper" id="stepper">
+    <div class="step-pill" data-step="1"><div class="num">1</div><div><div class="t">Label them yourself</div><div class="s">Your judgment first</div></div></div>
+    <div class="step-pill" data-step="2"><div class="num">2</div><div><div class="t">Prompt &amp; run models</div><div class="s">Paste key, run AI</div></div></div>
+    <div class="step-pill" data-step="3"><div class="num">3</div><div><div class="t">Compare &amp; score</div><div class="s">You vs. the models</div></div></div>
+  </div>
+
+  <!-- STEP 1 -->
+  <section id="panel-1">
+    <div class="card">
+      <h2 class="section">Step 1 — Label each review yourself</h2>
+      <p class="lead">Read each review and choose a <b>sentiment</b> and a <b>primary topic</b>. Do this from your own judgment before you see what the models say. Your labels are the "answer key" everything is measured against.</p>
+      <div class="note">💡 There are no official right answers — reasonable people disagree, especially on <b>mixed</b> sentiment and on reviews that touch several products. That ambiguity is exactly what makes this a good test of a prompt.</div>
+      <div id="reviewList"></div>
+      <div class="warnbox" id="labelWarn">Please choose a sentiment <b>and</b> a topic for every review before continuing.</div>
+      <div class="btnrow">
+        <button class="btn" id="toStep2">Save my labels &amp; continue →</button>
+        <span class="hint" id="labelCount"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section id="panel-2" class="hidden">
+    <div class="card">
+      <h2 class="section">Step 2 — Write your prompt and run the models</h2>
+      <p class="lead">This is the instruction each model receives for every review. Edit it to see how wording changes the results — then look below to see the extra text the tool adds automatically.</p>
+      <div class="field" style="margin-bottom:16px">
+        <label for="prompt">Your classification prompt</label>
+        <textarea id="prompt" rows="12"></textarea>
+      </div>
+      <div class="appendbox">
+        <div class="appendlabel">↓ Automatically appended to every prompt (you don't type this)</div>
+        <pre id="formatRuleView"></pre>
+        <div class="hint" style="margin-top:8px">Why this matters: language models return free-form text by default. To read the answers back automatically, we have to <b>constrain the output</b> — here, by demanding a JSON object and spelling out the exact allowed values for each field. Notice how much of "getting a usable answer" is really about pinning down the <i>format</i>, not just the task. If you remove or weaken constraints like these, parsing the results becomes much harder.</div>
+      </div>
+      <div class="field" style="max-width:520px">
+        <label for="apiKey">API key (paste the key your instructor gave you)</label>
+        <input type="password" id="apiKey" placeholder="Paste your Azure API key here" autocomplete="off">
+        <span class="hint">Stays in your browser only — it is sent directly to the model endpoint and never stored anywhere else.</span>
+      </div>
+      <div class="btnrow" style="margin-top:16px">
+        <button class="btn secondary" id="backTo1">← Back to my labels</button>
+        <button class="btn" id="runBtn">▶ Run all three models (30 calls)</button>
+      </div>
+      <div class="warnbox" id="runWarn"></div>
+      <div class="progress-wrap" id="progressWrap">
+        <div class="bar"><div id="barFill"></div></div>
+        <div class="progress-label" id="progressLabel">Starting…</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section id="panel-3" class="hidden">
+    <div class="card">
+      <h2 class="section">Step 3 — How well did each model agree with you?</h2>
+      <p class="lead">Green means the model matched your label; red means it differed. "Overall" counts a review as agreeing only when <b>both</b> sentiment and topic match.</p>
+      <div class="summary-grid" id="summaryGrid"></div>
+      <div class="tablewrap"><table id="resultTable"></table></div>
+      <div class="legend">
+        <span><span class="swatch" style="background:var(--good-bg);border:1px solid #b2f2bb"></span> matches your label</span>
+        <span><span class="swatch" style="background:var(--bad-bg);border:1px solid #ffc9c9"></span> differs from your label</span>
+        <span><span class="swatch" style="background:#f1f3f5;border:1px dashed #ced4da"></span> no valid answer (error)</span>
+      </div>
+      <div class="btnrow" style="margin-top:18px">
+        <button class="btn secondary" id="backTo2">← Change prompt &amp; re-run</button>
+        <button class="btn ghost" id="downloadCsv">⬇ Download results (CSV)</button>
+        <button class="btn ghost" id="restartBtn">↺ Start over</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+<footer class="foot">Runs entirely in your browser. Your reviews, labels, and API key never leave this page except for the direct calls to the model endpoint.</footer>
+
+<script>
+/* ============================ CONFIG ============================ */
+const ENDPOINT = "https://gschu-mostg8l7-eastus2.services.ai.azure.com/openai/v1";
+const MODELS = [
+  { id: "grok-4-1-fast-non-reasoning", name: "Grok 4.1 Fast", color: "var(--grok)", hex:"#7048e8" },
+  { id: "gpt-5-nano",                  name: "GPT-5 nano",    color: "var(--gpt)",  hex:"#1971c2" },
+  { id: "DeepSeek-V4-Flash",           name: "DeepSeek V4 Flash", color: "var(--deepseek)", hex:"#0ca678" },
+];
+
+const SENTIMENTS = [
+  { value:"positive", label:"Positive" },
+  { value:"negative", label:"Negative" },
+  { value:"mixed",    label:"Mixed" },
+];
+const TOPICS = [
+  { value:"auto loan",              label:"Auto loan" },
+  { value:"mortgage",               label:"Mortgage" },
+  { value:"student loan refinance", label:"Student loan refinance" },
+  { value:"small-business lending", label:"Small-business lending" },
+  { value:"deposit accounts",       label:"Deposit accounts (checking / savings / CD)" },
+  { value:"fraud/dispute handling", label:"Fraud / dispute handling" },
+  { value:"other",                  label:"Other" },
+];
+
+const DEFAULT_PROMPT =
+`You are analyzing customer reviews of a credit union. For each review, decide two things.
+
+1) SENTIMENT — the reviewer's overall attitude toward the credit union:
+   - positive: mostly satisfied / would recommend
+   - negative: mostly dissatisfied / frustrated
+   - mixed: clearly praises some things and criticizes others
+
+2) TOPIC — the ONE primary product or service the review is mainly about.
+   Pick the single best fit. If the review is not clearly about one of the
+   listed products, choose "other".
+
+Judge the review as a whole. If several products come up, choose the one the
+reviewer spends the most time on or cares most about.`;
+
+const FORMAT_RULE =
+`\n\nRespond with ONLY a JSON object, and nothing else, using exactly these keys and choosing only from these allowed values:
+{"sentiment": "positive" | "negative" | "mixed",
+ "topic": "auto loan" | "mortgage" | "student loan refinance" | "small-business lending" | "deposit accounts" | "fraud/dispute handling" | "other"}`;
+
+/* Reviews are injected below from the class dataset. */
+const REVIEWS = [{"n": 1, "text": "Mixed feelings about this place and I want to be fair. The in-branch experience is genuinely excellent. Where things fall apart is anything involving their technology or their call center. I tried to dispute a fraudulent charge back in March and it took THREE separate phone calls, each with a 30+ minute hold time, before anyone actually filed the dispute. So the outcome was fine but the process was maddening. If you're someone who likes to handle everything in person, this is a great credit union. If you travel a lot or need reliable phone/online support, maybe look elsewhere."}, {"n": 2, "text": "Small credit union, big heart. I run a tiny landscaping business and cash flow is always tight in the winter months. Two years ago I hit a genuinely scary stretch where I wasn't sure I could make payroll for my two employees. Instead the branch manager personally walked me through a small business line of credit, explained exactly how the interest would work in plain English, and got it set up fast enough that I made payroll on time. That line of credit basically saved my business. Cannot recommend them enough for small business owners."}, {"n": 3, "text": "Let me start by saying the people who work here are lovely, so this review isn't about them personally. My frustration is entirely with the antiquated systems and limited hours. Their branches close at 4:30pm on weekdays and they're only open until noon on Saturdays, which is nearly impossible if you work a normal job. Wire transfers have to be initiated in person, which is absurd in 2026. The online banking works but feels bare-bones, and there's no Zelle integration. Solid and trustworthy, just frustratingly behind the times."}, {"n": 4, "text": "I opened accounts here about eight months ago based on all the glowing reviews and my experience has been decidedly average. Nothing has gone wrong, exactly. But nothing has particularly impressed me either. The savings rate is fine but not the best I could find if I shopped around online-only banks. The branch staff are pleasant but I wouldn't say they've gone above and beyond in any memorable way. The app is functional but forgettable. For routine everyday banking, it's perfectly adequate. Just don't go in expecting magic for depositing your paycheck and paying bills."}, {"n": 5, "text": "Absolutely phenomenal experience refinancing my student loans through this credit union. I had roughly $48,000 in loans spread across four different servicers at rates ranging from 6.8% to 9.1%. The loan officer, Marcus, was extraordinary. He ran the numbers with me transparently, showed me exactly how much I'd save over the life of the loan by consolidating everything into a single fixed-rate loan at 5.4%, and never once pressured me. I now have one payment, one due date, a lower rate, and hundreds of dollars saved every month."}];
+
+/* ============================ STATE ============================ */
+const state = {
+  labels: {},              // { reviewIndex: {sentiment, topic} }
+  results: {},             // { modelId: { reviewIndex: {sentiment, topic, raw} | {error} } }
+};
+try { const saved = JSON.parse(localStorage.getItem("cu_labels")||"{}"); if(saved && typeof saved==="object") state.labels = saved; } catch(e){}
+const savedPrompt = localStorage.getItem("cu_prompt");
+
+/* ============================ HELPERS ============================ */
+const $ = sel => document.querySelector(sel);
+const el = (tag, attrs={}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const k in attrs){ if(k==="class") n.className=attrs[k]; else if(k==="html") n.innerHTML=attrs[k]; else n.setAttribute(k, attrs[k]); }
+  kids.flat().forEach(c => n.append(c.nodeType ? c : document.createTextNode(c)));
+  return n;
+};
+function normSentiment(s){
+  if(!s) return null; s = String(s).toLowerCase();
+  if(s.includes("posi")) return "positive";
+  if(s.includes("nega")) return "negative";
+  if(s.includes("mix")||s.includes("neutral")||s.includes("both")) return "mixed";
+  return null;
+}
+function normTopic(t){
+  if(!t) return null; t = String(t).toLowerCase();
+  if(t.includes("auto")||t.includes("car ")||t.includes("vehicle")) return "auto loan";
+  if(t.includes("mortgage")||t.includes("home loan")) return "mortgage";
+  if(t.includes("student")) return "student loan refinance";
+  if(t.includes("business")) return "small-business lending";
+  if(t.includes("deposit")||t.includes("checking")||t.includes("savings")||t.includes("cd")||t.includes("account")) return "deposit accounts";
+  if(t.includes("fraud")||t.includes("dispute")||t.includes("scam")||t.includes("unauthor")) return "fraud/dispute handling";
+  if(t.includes("other")) return "other";
+  return "other";
+}
+const sentLabel = v => (SENTIMENTS.find(s=>s.value===v)||{}).label || v;
+const topicLabel = v => (TOPICS.find(s=>s.value===v)||{}).label || v;
+const sentClass = v => v==="positive"?"b-pos":v==="negative"?"b-neg":"b-mix";
+
+/* ============================ STEP NAV ============================ */
+function goStep(n){
+  [1,2,3].forEach(i=>{
+    $("#panel-"+i).classList.toggle("hidden", i!==n);
+    const pill = document.querySelector('.step-pill[data-step="'+i+'"]');
+    pill.classList.toggle("active", i===n);
+    pill.classList.toggle("done", i<n);
+  });
+  window.scrollTo({top:0, behavior:"smooth"});
+}
+
+/* ============================ STEP 1: RENDER REVIEWS ============================ */
+function makeSelect(index, kind, options, placeholder){
+  const sel = el("select");
+  sel.classList.add("unset");
+  sel.append(el("option",{value:""}, placeholder));
+  options.forEach(o=> sel.append(el("option",{value:o.value}, o.label)));
+  const cur = state.labels[index]?.[kind];
+  if(cur){ sel.value = cur; sel.classList.remove("unset"); }
+  sel.addEventListener("change", ()=>{
+    state.labels[index] = state.labels[index] || {};
+    state.labels[index][kind] = sel.value;
+    sel.classList.toggle("unset", !sel.value);
+    localStorage.setItem("cu_labels", JSON.stringify(state.labels));
+    updateLabelCount();
+  });
+  return sel;
+}
+function renderReviews(){
+  const list = $("#reviewList"); list.innerHTML = "";
+  REVIEWS.forEach((r, i)=>{
+    const card = el("div",{class:"review"},
+      el("div",{class:"rhead"}, el("span",{class:"badge-num"}, "Review "+r.n)),
+      el("div",{class:"rtext"}, r.text),
+      el("div",{class:"controls"},
+        el("div",{class:"field"}, el("label",{}, "Sentiment"), makeSelect(i,"sentiment",SENTIMENTS,"— choose sentiment —")),
+        el("div",{class:"field"}, el("label",{}, "Primary topic"), makeSelect(i,"topic",TOPICS,"— choose topic —")),
+      ),
+    );
+    list.append(card);
+  });
+  updateLabelCount();
+}
+function countLabeled(){
+  let done=0;
+  REVIEWS.forEach((_,i)=>{ const l=state.labels[i]; if(l&&l.sentiment&&l.topic) done++; });
+  return done;
+}
+function updateLabelCount(){
+  const done = countLabeled();
+  $("#labelCount").textContent = done+" of "+REVIEWS.length+" reviews labeled";
+}
+
+/* ============================ STEP 2: API CALLS ============================ */
+function extractJson(text){
+  if(!text) throw new Error("empty response");
+  const a = text.indexOf("{"), b = text.lastIndexOf("}");
+  if(a===-1||b===-1) throw new Error("no JSON found");
+  return JSON.parse(text.slice(a,b+1));
+}
+async function classify(modelId, reviewText, promptText){
+  const body = {
+    model: modelId,
+    messages: [
+      { role:"system", content: promptText + FORMAT_RULE },
+      { role:"user",   content: 'REVIEW:\n"""\n' + reviewText + '\n"""' }
+    ],
+    response_format: { type:"json_object" },
+    max_completion_tokens: 3000
+  };
+  const resp = await fetch(ENDPOINT + "/chat/completions", {
+    method:"POST",
+    headers:{ "Content-Type":"application/json", "api-key": state.apiKey },
+    body: JSON.stringify(body)
+  });
+  if(!resp.ok){
+    let detail = "";
+    try{ detail = (await resp.json()).error?.message || ""; }catch(e){ try{ detail = (await resp.text()).slice(0,160);}catch(_){} }
+    const e = new Error("HTTP "+resp.status+(detail?": "+detail:"")); e.status = resp.status; throw e;
+  }
+  const data = await resp.json();
+  const content = data.choices?.[0]?.message?.content || "";
+  const parsed = extractJson(content);
+  const sentiment = normSentiment(parsed.sentiment);
+  const topic = normTopic(parsed.topic);
+  if(!sentiment) throw new Error("unrecognized sentiment: "+parsed.sentiment);
+  return { sentiment, topic, raw: content };
+}
+async function runPool(tasks, limit, onDone){
+  let idx=0, done=0; const out=new Array(tasks.length);
+  async function worker(){
+    while(idx<tasks.length){
+      const i=idx++;
+      try{ out[i]={ok:true, value:await tasks[i].fn()}; }
+      catch(e){ out[i]={ok:false, error:e.message, status:e.status}; }
+      done++; onDone(done, tasks.length, out[i]);
+    }
+  }
+  await Promise.all(Array.from({length:Math.min(limit,tasks.length)}, worker));
+  return out;
+}
+async function runModels(){
+  const warn = $("#runWarn"); warn.style.display="none";
+  state.apiKey = $("#apiKey").value.trim();
+  const promptText = $("#prompt").value.trim() || DEFAULT_PROMPT;
+  localStorage.setItem("cu_prompt", $("#prompt").value);
+  if(!state.apiKey){ warn.innerHTML="Please paste your API key first."; warn.style.display="block"; return; }
+
+  $("#runBtn").disabled = true; $("#backTo1").disabled = true;
+  $("#progressWrap").style.display="block";
+  const total = MODELS.length * REVIEWS.length;
+
+  // build tasks
+  const tasks = [];
+  MODELS.forEach(m => REVIEWS.forEach((r,ri)=> tasks.push({ modelId:m.id, ri, fn:()=>classify(m.id, r.text, promptText) })));
+  state.results = {}; MODELS.forEach(m=> state.results[m.id]={});
+
+  let firstError = null;
+  const results = await runPool(tasks, 6, (done,tot,last)=>{
+    const pct = Math.round(done/tot*100);
+    $("#barFill").style.width = pct+"%";
+    $("#progressLabel").textContent = "Labeling… "+done+" / "+tot+" model answers received";
+    if(last && !last.ok && !firstError) firstError = last;
+  });
+  // assemble
+  results.forEach((res, i)=>{
+    const {modelId, ri} = tasks[i];
+    state.results[modelId][ri] = res.ok ? res.value : {error: res.error};
+  });
+
+  $("#runBtn").disabled = false; $("#backTo1").disabled = false;
+
+  // If the very first calls failed with auth error, surface it and stay on step 2
+  const allFailed = results.every(r=>!r.ok);
+  if(allFailed){
+    const msg = firstError?.status===401 || firstError?.status===403
+      ? "Every call was rejected (HTTP "+firstError.status+"). The API key looks invalid or expired — double-check what you pasted."
+      : "Every call failed. First error: "+(firstError?.error||"unknown")+". Check your connection and try again.";
+    warn.innerHTML = msg; warn.style.display="block";
+    $("#progressWrap").style.display="none";
+    return;
+  }
+  renderResults();
+  goStep(3);
+}
+
+/* ============================ STEP 3: RESULTS ============================ */
+function renderResults(){
+  // summary cards
+  const grid = $("#summaryGrid"); grid.innerHTML="";
+  const scores = {};
+  MODELS.forEach(m=>{
+    let sMatch=0, tMatch=0, both=0, valid=0;
+    REVIEWS.forEach((_,ri)=>{
+      const human = state.labels[ri]; const res = state.results[m.id][ri];
+      if(!res || res.error) return;
+      valid++;
+      const sOk = res.sentiment===human.sentiment;
+      const tOk = res.topic===human.topic;
+      if(sOk) sMatch++; if(tOk) tMatch++; if(sOk&&tOk) both++;
+    });
+    scores[m.id] = {sMatch,tMatch,both,valid};
+    const n = REVIEWS.length;
+    const pct = x => Math.round(x/n*100);
+    const metric = (name,val,hex)=> el("div",{class:"metric"},
+      el("div",{class:"mrow"}, el("span",{}, name), el("span",{}, val+"/"+n+"  ("+pct(val)+"%)")),
+      el("div",{class:"track"}, el("div",{style:"width:"+pct(val)+"%;background:"+hex})),
+    );
+    grid.append(el("div",{class:"mcard"},
+      el("div",{class:"mname"}, el("span",{class:"dot",style:"background:"+m.hex}), m.name),
+      el("div",{class:"big",style:"color:"+m.hex}, pct(both)+"%"),
+      el("div",{class:"biglbl"}, "overall agreement with you"),
+      metric("Sentiment", sMatch, m.hex),
+      metric("Topic", tMatch, m.hex),
+      (scores[m.id].valid<n ? el("div",{class:"hint",style:"margin-top:8px;color:var(--warn)"}, (n-scores[m.id].valid)+" review(s) had no valid answer") : ""),
+    ));
+  });
+
+  // table
+  const t = $("#resultTable"); t.innerHTML="";
+  const head = el("tr",{},
+    el("th",{}, "#"),
+    el("th",{}, "Review"),
+    el("th",{}, "Your label"),
+    ...MODELS.map(m=> el("th",{html:'<span class="dot" style="background:'+m.hex+'"></span>'+m.name})),
+  );
+  t.append(el("thead",{}, head));
+  const tb = el("tbody");
+  REVIEWS.forEach((r,ri)=>{
+    const human = state.labels[ri];
+    const revCell = el("td",{class:"rev"},
+      el("details",{}, el("summary",{}, "Review "+r.n),
+        el("div",{class:"rt",style:"margin-top:6px"}, r.text)),
+    );
+    const humanCell = el("td",{},
+      el("div",{class:"cellstack"},
+        el("span",{class:"badge "+sentClass(human.sentiment)}, sentLabel(human.sentiment)),
+        el("span",{class:"badge b-topic"}, topicLabel(human.topic)),
+      )
+    );
+    const modelCells = MODELS.map(m=>{
+      const res = state.results[m.id][ri];
+      if(!res || res.error){
+        return el("td",{}, el("div",{class:"cellstack"},
+          el("span",{class:"badge b-err", title:(res&&res.error)||"error"}, "no answer"),
+        ));
+      }
+      const sOk = res.sentiment===human.sentiment;
+      const tOk = res.topic===human.topic;
+      return el("td",{}, el("div",{class:"cellstack"},
+        el("span",{class:"badge "+(sOk?"b-match":"b-miss"), title:sOk?"matches you":"you said: "+sentLabel(human.sentiment)}, (sOk?"✓ ":"✗ ")+sentLabel(res.sentiment)),
+        el("span",{class:"badge "+(tOk?"b-match":"b-miss"), title:tOk?"matches you":"you said: "+topicLabel(human.topic)}, (tOk?"✓ ":"✗ ")+topicLabel(res.topic)),
+      ));
+    });
+    tb.append(el("tr",{}, el("td",{}, String(r.n)), revCell, humanCell, ...modelCells));
+  });
+  t.append(tb);
+}
+
+function downloadCsv(){
+  const rows = [];
+  const head = ["review_num","review_text","your_sentiment","your_topic"];
+  MODELS.forEach(m=> head.push(m.name+"_sentiment", m.name+"_topic"));
+  rows.push(head);
+  REVIEWS.forEach((r,ri)=>{
+    const h = state.labels[ri];
+    const row = [r.n, r.text, h.sentiment, h.topic];
+    MODELS.forEach(m=>{
+      const res = state.results[m.id][ri];
+      if(!res || res.error){ row.push("ERROR","ERROR"); }
+      else { row.push(res.sentiment, res.topic); }
+    });
+    rows.push(row);
+  });
+  const esc = v => '"'+String(v).replace(/"/g,'""')+'"';
+  const csv = rows.map(r=>r.map(esc).join(",")).join("\r\n");
+  const blob = new Blob([csv], {type:"text/csv"});
+  const a = el("a",{href:URL.createObjectURL(blob), download:"credit_union_eval_results.csv"});
+  document.body.append(a); a.click(); a.remove();
+}
+
+/* ============================ WIRING ============================ */
+$("#prompt").value = (savedPrompt!==null ? savedPrompt : DEFAULT_PROMPT);
+// dynamic counts (so changing the number of reviews needs no code edits)
+const N = REVIEWS.length, TOTAL_CALLS = MODELS.length * N;
+$("#subtitle").textContent = "Hand-label "+N+" member reviews, then see how three AI models label them — and where they disagree with you.";
+$("#runBtn").textContent = "▶ Run all three models ("+TOTAL_CALLS+" calls)";
+// show the exact text the tool appends to the prompt (a key learning point)
+$("#formatRuleView").textContent = FORMAT_RULE.trim();
+renderReviews();
+goStep(1);
+
+$("#toStep2").addEventListener("click", ()=>{
+  if(countLabeled() < REVIEWS.length){ $("#labelWarn").style.display="block"; return; }
+  $("#labelWarn").style.display="none";
+  goStep(2);
+});
+$("#backTo1").addEventListener("click", ()=>goStep(1));
+$("#backTo2").addEventListener("click", ()=>goStep(2));
+$("#runBtn").addEventListener("click", runModels);
+$("#downloadCsv").addEventListener("click", downloadCsv);
+$("#restartBtn").addEventListener("click", ()=>{
+  if(!confirm("Clear your labels and results and start over?")) return;
+  state.labels={}; state.results={}; localStorage.removeItem("cu_labels");
+  renderReviews(); goStep(1);
+});
+
+// allow clicking a completed step in the stepper to jump back
+document.querySelectorAll(".step-pill").forEach(p=>{
+  p.addEventListener("click", ()=>{
+    const n = +p.dataset.step;
+    if(n===1) goStep(1);
+    else if(n===2 && countLabeled()===REVIEWS.length) goStep(2);
+    else if(n===3 && Object.keys(state.results).length) goStep(3);
+  });
+});
+</script>
+</body>
+</html>
